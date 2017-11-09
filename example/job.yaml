@@ -1,0 +1,41 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: minshell-example
+spec:
+  template:
+    metadata:
+      name: minshell-example
+    spec:
+      volumes:
+      - name: semaphore
+        emptyDir: {}
+        
+      containers:
+      - name: worker
+        image: quay.io/cloudguardtech/min-shell:latest
+        volumeMounts:
+        - mountPath: /home/app/semaphore
+          name: semaphore
+        command: [ "/bin/bash" ]
+        args:
+        - -c
+        - >
+          KUBE_TOKEN=$(cat /var/run/secrets/kubernetes.io/serviceaccount/token) &&
+          podname=$(curl -sSk -H "Authorization: Bearer $KUBE_TOKEN" https://kubernetes.default.svc.cluster.local/api/v1/namespaces/default/pods |jq '.items[] .metadata.name' |grep -i minshell-example | sed -e 's/\"//g') &&
+          podip=$(curl -sSk -H "Authorization: Bearer $KUBE_TOKEN" https://kubernetes.default.svc.cluster.local/api/v1/namespaces/default/pods/$podname | jq '.status.podIP' | sed -e 's/\"//g') &&
+          echo "$(date): The podname = $podname at IP $podip" &&
+          touch semaphore/done
+      - name: cleanup
+        image: quay.io/cloudguardtech/min-shell:latest
+        volumeMounts:
+        - mountPath: /home/app/semaphore
+          name: semaphore
+        command: [ "/bin/bash" ]
+        args:
+        - -c
+        - >
+          echo "$(date): Waiting till the worker is done" &&
+          while [ ! -f semaphore/done ]; do sleep 2; done &&
+          echo "$(date):Worker is finished - time to clean up"
+      restartPolicy: Never
